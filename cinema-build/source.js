@@ -4,43 +4,49 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 const clamp=THREE.MathUtils.clamp, mix=THREE.MathUtils.lerp;
 const smooth=(a,b,x)=>{let t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)};
 const asset=n=>new URL(n,import.meta.url).href;
-const SEEN='ns-cinema-compass-v2';
+const SEEN='ns-cinema-compass-v3';
 const safeGet=k=>{try{return sessionStorage.getItem(k)}catch{return null}};
 const safeSet=(k,v)=>{try{sessionStorage.setItem(k,v)}catch{}};
 
 export async function startIntro(intro) {
  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
- let closed=false, renderer, frame, started=0, audio, soundSources=[], master, audioPromise,resize;
+ let closed=false, renderer, frame, started=0, audio, soundSources=[], master, audioPromise,resize,soundTask,audioStarted=false;
  const root=document.documentElement;
- const finish=()=>{if(closed)return;closed=true;cancelAnimationFrame(frame);if(resize)removeEventListener('resize',resize);clearTimeout(watchdog);intro.classList.add('hidden');root.classList.remove('cinema-active');document.querySelectorAll('body > .header,body > main,body > .footer').forEach(e=>e.inert=false);root.classList.add('cinema-arrived');safeSet(SEEN,'yes');for(const s of soundSources){try{s.stop()}catch{}}if(audio)audio.close().catch(()=>{});setTimeout(()=>{if(renderer){renderer.dispose();renderer.domElement.remove()}intro.hidden=true;root.classList.remove('cinema-arrived')},1100);document.removeEventListener('keydown',onKey)};
+ const finish=()=>{if(closed)return;closed=true;cancelAnimationFrame(frame);if(resize)removeEventListener('resize',resize);clearTimeout(watchdog);intro.classList.add('hidden');root.classList.remove('cinema-active');document.querySelectorAll('body > .header,body > main,body > .footer').forEach(e=>e.inert=false);root.classList.add('cinema-arrived');safeSet(SEEN,'yes');for(const s of soundSources){try{s.stop()}catch{}}if(audio)audio.close().catch(()=>{});setTimeout(()=>{if(renderer){renderer.dispose();renderer.domElement.remove()}intro.hidden=true;root.classList.remove('cinema-arrived')},1100);document.removeEventListener('keydown',onKey);for(const event of ['pointerdown','touchend','keydown'])document.removeEventListener(event,unlockSound,true)};
  const onKey=e=>{if(e.key==='Escape')finish()};
  const watchdog=setTimeout(finish,14000);
  const replay=new URL(location.href).searchParams.get('intro')==='1';
  const frameValue=new URL(location.href).searchParams.get('introFrame');const stillTime=frameValue===null?null:clamp(Number(frameValue)||0,0,7.9);
  if((safeGet(SEEN)&&!replay)||reduced){finish();return}
  intro.hidden=false;root.classList.add('cinema-active');document.querySelectorAll('body > .header,body > main,body > .footer').forEach(e=>e.inert=true);intro.classList.add('cinema-intro');
- intro.innerHTML='<div class="cinema-fallback"><img src="assets/logo-transparent.webp" width="360" height="240" alt="North South Entertainment"></div><div class="cinema-vignette" aria-hidden="true"></div><div class="cinema-caption"><span>NORTH SOUTH ENTERTAINMENT</span><small>A WORLD OF POSSIBILITIES</small></div><div class="cinema-controls"><button type="button" id="intro-sound" aria-pressed="false">◖ Sound on</button><button type="button" id="intro-skip">Skip intro ↗</button></div>';
- const sound=intro.querySelector('#intro-sound');
- intro.querySelector('#intro-skip').addEventListener('click',finish);document.addEventListener('keydown',onKey);
- async function playSound(){
+ intro.innerHTML='<div class="cinema-fallback"><img src="assets/logo-transparent.webp" width="360" height="240" alt="North South Entertainment"></div><div class="cinema-vignette" aria-hidden="true"></div><div class="cinema-caption"><span>NORTH SOUTH ENTERTAINMENT</span><small>A WORLD OF POSSIBILITIES</small></div>';
+ document.addEventListener('keydown',onKey);
+ function unlockSound(){playSound()}
+ for(const event of ['pointerdown','touchend','keydown'])document.addEventListener(event,unlockSound,{capture:true,passive:true});
+ function playSound(){
+  if(closed||audioStarted)return;
   try {
    if(!audio){audio=new (window.AudioContext||window.webkitAudioContext)();master=audio.createGain();master.gain.value=.6;master.connect(audio.destination)}
-   await audio.resume();if(audio.state!=='running')return;
    audioPromise ||= fetch(asset('jaguar-call.m4a')).then(r=>{if(!r.ok)throw Error('audio');return r.arrayBuffer()}).then(b=>audio.decodeAudioData(b));
-   const buffer=await audioPromise;if(closed)return;
-   for(const s of soundSources){try{s.stop()}catch{}}soundSources=[];
-   const now=audio.currentTime;
-   // Sustain the licensed jaguar call as a single long, layered cinematic roar.
-   const compressor=audio.createDynamicsCompressor();compressor.threshold.value=-14;compressor.knee.value=18;compressor.ratio.value=4;compressor.attack.value=.008;compressor.release.value=.2;compressor.connect(master);
-   [.69,.91].forEach((rate,i)=>{
-    const source=audio.createBufferSource(),filter=audio.createBiquadFilter(),gain=audio.createGain();source.buffer=buffer;source.playbackRate.value=rate;source.loop=true;source.loopStart=.08;source.loopEnd=Math.min(buffer.duration-.04,1.2);filter.type='lowpass';filter.frequency.value=i?3100:1700;
-    gain.gain.setValueAtTime(0,now);gain.gain.linearRampToValueAtTime(i?.32:.78,now+.18);gain.gain.setValueAtTime(i?.3:.7,now+5.65);gain.gain.exponentialRampToValueAtTime(.001,now+7.35);
-    source.connect(filter);filter.connect(gain);gain.connect(compressor);source.start(now);source.stop(now+7.4);soundSources.push(source)
-   });
-   intro.dataset.audio='playing';sound.textContent='◖ Sound off';sound.setAttribute('aria-pressed','true');
-  }catch{sound.textContent='◖ Try sound again'}
+   // Retry resume synchronously inside an ordinary gesture if autoplay is blocked.
+   const resuming=audio.resume();intro.dataset.audio=audio.state==='running'?'starting':'autoplay-blocked';
+   if(!started||soundTask){resuming.catch(()=>{});return}
+   soundTask=(async()=>{
+    await resuming;const buffer=await audioPromise;if(closed||audioStarted||audio.state!=='running')return;
+    const elapsed=clamp((performance.now()-started)/1000,0,8),remaining=7.4-elapsed;
+    if(remaining<=.1)return;
+    audioStarted=true;const now=audio.currentTime;
+    const compressor=audio.createDynamicsCompressor();compressor.threshold.value=-14;compressor.knee.value=18;compressor.ratio.value=4;compressor.attack.value=.008;compressor.release.value=.2;compressor.connect(master);
+    [.69,.91].forEach((rate,i)=>{
+     const source=audio.createBufferSource(),filter=audio.createBiquadFilter(),gain=audio.createGain();source.buffer=buffer;source.playbackRate.value=rate;source.loop=true;source.loopStart=.08;source.loopEnd=Math.min(buffer.duration-.04,1.2);filter.type='lowpass';filter.frequency.value=i?3100:1700;
+     const level=(i?.32:.78)*(elapsed>5.65?Math.max(.001,(7.4-elapsed)/1.75):1);
+     gain.gain.setValueAtTime(0,now);gain.gain.linearRampToValueAtTime(level,now+Math.min(.08,remaining/3));gain.gain.setValueAtTime(level,now+Math.max(.09,5.65-elapsed));gain.gain.exponentialRampToValueAtTime(.001,now+remaining);
+     source.connect(filter);filter.connect(gain);gain.connect(compressor);const loopLength=source.loopEnd-source.loopStart;source.start(now,source.loopStart+(elapsed*rate)%loopLength);source.stop(now+remaining);soundSources.push(source)
+    });
+    intro.dataset.audio='playing';for(const event of ['pointerdown','touchend','keydown'])document.removeEventListener(event,unlockSound,true);
+   })().catch(()=>{intro.dataset.audio='unavailable'}).finally(()=>{soundTask=null});
+  }catch{intro.dataset.audio='unavailable'}
  }
- sound.addEventListener('click',()=>{if(audio?.state==='running'&&sound.getAttribute('aria-pressed')==='true'){master.gain.value=0;sound.textContent='◖ Sound on';sound.setAttribute('aria-pressed','false')}else{if(master)master.gain.value=.6;started=performance.now();playSound()}});
  try {
   renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});
   renderer.setPixelRatio(Math.min(devicePixelRatio,1.7));renderer.setClearColor(0x03070d,1);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.3;
@@ -81,8 +87,8 @@ export async function startIntro(intro) {
   const starGeo=new THREE.BufferGeometry(),starPos=[];let seed=19;const rand=()=>{seed=(seed*16807)%2147483647;return(seed-1)/2147483646};for(let i=0;i<650;i++)starPos.push((rand()-.5)*70,(rand()-.5)*50,-10-rand()*35);starGeo.setAttribute('position',new THREE.Float32BufferAttribute(starPos,3));scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0xb6c5d8,size:.045,transparent:true,opacity:.65})));
   resize=()=>{const w=innerWidth,h=innerHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h)};resize();addEventListener('resize',resize);
   intro.classList.add('cinema-ready');started=performance.now();
-  // Sound may start automatically only where the browser already allows it.
-  if(navigator.userActivation?.hasBeenActive)playSound();
+  // Always request synchronized sound without requiring an intro control.
+  playSound();
   function tick(now){
    if(closed){removeEventListener('resize',resize);environment.dispose();pmrem.dispose();return}
    const t=stillTime??(now-started)/1000,mobile=camera.aspect<.85,baseZ=Math.max(10.1,6/(2*Math.tan(THREE.MathUtils.degToRad(43/2))*camera.aspect)*1.22);
