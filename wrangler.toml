@@ -1,0 +1,8 @@
+name = "northsouthent-site"
+pages_build_output_dir = "./public"
+compatibility_date = "2026-11-05"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "northsouthent-db"
+database_id = "e43e2de3-e600-432c-9195-b0a93e8baf74"

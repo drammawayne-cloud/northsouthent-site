@@ -40,3 +40,5 @@ def build(slug):
  return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><meta name="description" content="'+escape(summary,quote=True)+'"><title>'+escape(label)+' | North South Entertainment</title><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css"><script defer src="site.js"></script></head><body>'+intro+header+'<main id="main">'+hero+main(slug)+'</main>'+footer+'</body></html>'
 for slug in pages:(P/(slug+".html")).write_text(build(slug))
 print("BUILT",len(pages),"PAGES")
+
+import phase2
