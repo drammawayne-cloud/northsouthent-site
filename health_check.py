@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import subprocess,sys
 BASE="https://northsouthent-site.pages.dev/"
-ROUTES=["index","about","services","business-management","marketing","consulting","health-wellness","artists","events","partners","gallery","contact","account"]
+ROUTES=["index","about","services","business-management","marketing","consulting","health-wellness","rental-properties","artists","events","partners","gallery","contact","account"]
 fail=[]
 for name in ROUTES:
  r=subprocess.run(["curl","-sSL","--max-time","20","-o","/dev/null","-w","%{http_code}",BASE+name+".html"],capture_output=True,text=True)
