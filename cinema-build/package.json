@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild source.js --bundle --minify --format=esm --outfile=../assets/cinema-v1.js"
+    "build": "esbuild source.js --bundle --minify --format=esm --outfile=../assets/cinema-v2.js"
   },
   "dependencies": {
     "three": "0.187.0"

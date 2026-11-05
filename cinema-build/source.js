@@ -4,7 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 const clamp=THREE.MathUtils.clamp, mix=THREE.MathUtils.lerp;
 const smooth=(a,b,x)=>{let t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t)};
 const asset=n=>new URL(n,import.meta.url).href;
-const SEEN='ns-cinema-compass-v1';
+const SEEN='ns-cinema-compass-v2';
 const safeGet=k=>{try{return sessionStorage.getItem(k)}catch{return null}};
 const safeSet=(k,v)=>{try{sessionStorage.setItem(k,v)}catch{}};
 
@@ -16,6 +16,7 @@ export async function startIntro(intro) {
  const onKey=e=>{if(e.key==='Escape')finish()};
  const watchdog=setTimeout(finish,14000);
  const replay=new URL(location.href).searchParams.get('intro')==='1';
+ const frameValue=new URL(location.href).searchParams.get('introFrame');const stillTime=frameValue===null?null:clamp(Number(frameValue)||0,0,7.9);
  if((safeGet(SEEN)&&!replay)||reduced){finish();return}
  intro.hidden=false;root.classList.add('cinema-active');document.querySelectorAll('body > .header,body > main,body > .footer').forEach(e=>e.inert=true);intro.classList.add('cinema-intro');
  intro.innerHTML='<div class="cinema-fallback"><img src="assets/logo-transparent.webp" width="360" height="240" alt="North South Entertainment"></div><div class="cinema-vignette" aria-hidden="true"></div><div class="cinema-caption"><span>NORTH SOUTH ENTERTAINMENT</span><small>A WORLD OF POSSIBILITIES</small></div><div class="cinema-controls"><button type="button" id="intro-sound" aria-pressed="false">◖ Sound on</button><button type="button" id="intro-skip">Skip intro ↗</button></div>';
@@ -52,13 +53,13 @@ export async function startIntro(intro) {
   const rim=new THREE.PointLight(0x80bfff,25,30);rim.position.set(4,1,-1);scene.add(rim);
   const sweep=new THREE.PointLight(0xffcc65,30,25);sweep.position.set(-5,2,4);scene.add(sweep);
   const loader=new THREE.TextureLoader();
-  const [logo,earth]=await Promise.all([loader.loadAsync(asset('logo-transparent.webp')),loader.loadAsync(asset('earth.jpg'))]);
+  const [logo,earth,jaguarAtlas]=await Promise.all([loader.loadAsync(asset('logo-transparent.webp')),loader.loadAsync(asset('earth.jpg')),loader.loadAsync(asset('jaguar-run-hd.webp'))]);
   if(closed){environment.dispose();pmrem.dispose();return}
   logo.colorSpace=earth.colorSpace=THREE.SRGBColorSpace;logo.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());
   const W=6,H=W*733/1100,compassY=-.36;
   const group=new THREE.Group();scene.add(group);
   const opening={value:0};
-  const face=new THREE.MeshStandardMaterial({map:logo,transparent:true,alphaTest:.15,roughness:.34,metalness:.45,emissive:0xffffff,emissiveMap:logo,emissiveIntensity:.13,side:THREE.DoubleSide});
+  const face=new THREE.MeshBasicMaterial({map:logo,transparent:true,alphaTest:.15,toneMapped:false,side:THREE.DoubleSide});
   face.onBeforeCompile=shader=>{shader.uniforms.portalRadius=opening;shader.fragmentShader='uniform float portalRadius;\n'+shader.fragmentShader;shader.fragmentShader=shader.fragmentShader.replace('#include <alphatest_fragment>','#include <alphatest_fragment>\n if(distance((vMapUv-vec2(0.5,0.41))*vec2(1.0,0.66636),vec2(0.0)) < portalRadius) discard;')};
   const plane=new THREE.Mesh(new THREE.PlaneGeometry(W,H),face);plane.position.z=.19;group.add(plane);
   // The outline is physically extruded from the original transparent artwork.
@@ -73,7 +74,7 @@ export async function startIntro(intro) {
   const silver=new THREE.MeshStandardMaterial({color:0xdce5ec,metalness:.95,roughness:.23});
   const needle=new THREE.Group();for(let i=0;i<8;i++){const n=new THREE.Mesh(new THREE.ConeGeometry(i%2?.065:.09,i%2?.34:.55,4),i%2?silver:gold);n.rotation.x=Math.PI/2;n.rotation.z=-i*Math.PI/4;n.position.set(Math.sin(i*Math.PI/4)*.17,Math.cos(i*Math.PI/4)*.17,.035);needle.add(n)}compass.add(needle);
   const jewel=new THREE.Mesh(new THREE.SphereGeometry(.075,16,12),silver);jewel.position.z=.15;needle.add(jewel);
-  const jaguar=makeJaguar();group.add(jaguar.root);
+  const jaguar=makeJaguar(jaguarAtlas);group.add(jaguar.root);group.add(jaguar.shadow);
   const globe=new THREE.Group();globe.position.set(0,compassY,-8);scene.add(globe);
   const planet=new THREE.Mesh(new THREE.SphereGeometry(2.5,64,48),new THREE.MeshStandardMaterial({map:earth,roughness:.82,metalness:.06,emissive:0x0c1a30,emissiveIntensity:.25}));globe.add(planet);
   const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(2.55,48,32),new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,depthWrite:false,uniforms:{glowColor:{value:new THREE.Color(0x609cda)}},vertexShader:'varying vec3 vN;varying vec3 vP;void main(){vN=normalize(normalMatrix*normal);vec4 p=modelViewMatrix*vec4(position,1.);vP=p.xyz;gl_Position=projectionMatrix*p;}',fragmentShader:'uniform vec3 glowColor;varying vec3 vN;varying vec3 vP;void main(){float a=pow(1.-abs(dot(normalize(vN),normalize(-vP))),3.);gl_FragColor=vec4(glowColor,a*.65);}'}));globe.add(atmosphere);
@@ -84,17 +85,22 @@ export async function startIntro(intro) {
   if(navigator.userActivation?.hasBeenActive)playSound();
   function tick(now){
    if(closed){removeEventListener('resize',resize);environment.dispose();pmrem.dispose();return}
-   const t=(now-started)/1000,mobile=camera.aspect<.85,baseZ=Math.max(10.1,6/(2*Math.tan(THREE.MathUtils.degToRad(43/2))*camera.aspect)*1.22);
+   const t=stillTime??(now-started)/1000,mobile=camera.aspect<.85,baseZ=Math.max(10.1,6/(2*Math.tan(THREE.MathUtils.degToRad(43/2))*camera.aspect)*1.22);
    group.rotation.y=mix(-.27,0,smooth(0,2.7,t));group.rotation.x=mix(.035,0,smooth(0,2.7,t));
    const push=smooth(3.7,6.1,t),earthPush=smooth(6.1,8,t);
    camera.position.set(mix(.45,0,smooth(0,3,t)),mix(.2,compassY,smooth(2.2,4,t)),mix(mix(baseZ,baseZ-.9,smooth(0,2.5,t)),-1.3,push)-earthPush*3.8);
    camera.lookAt(0,mix(0,compassY,smooth(2.2,4,t)),-7);
-   opening.value=smooth(4.4,5.85,t)*.44;depth.visible=t<5.65;needle.scale.setScalar(1-smooth(4.2,5.25,t));hoop.rotation.z=t*.08;
+   opening.value=smooth(4.4,5.85,t)*.44;depth.visible=t<5.65;needle.visible=false;hoop.visible=t>3.9;hoop.rotation.z=t*.08;
    sweep.position.x=mix(-6,6,smooth(.3,3.1,t));sweep.intensity=26+Math.sin(t*1.7)*8;
    planet.rotation.y=.7+t*.055;
-   // Jaguar follows the upward arrow, then bounds away before the fly-through.
-   const run=smooth(.35,3.7,t);jaguar.root.position.set(mix(-1.1,1.85,run),mix(.55,1.7,run)+Math.abs(Math.sin(t*10))*.055,.85);jaguar.root.rotation.y=-.12;jaguar.root.rotation.z=.23;jaguar.root.scale.setScalar(.65);jaguar.root.visible=t<3.85;
-   jaguar.legs.forEach((leg,i)=>{leg.rotation.z=Math.sin(t*12+(i%2?Math.PI:0)+(i>1?.9:0))*.8});jaguar.tail.rotation.y=Math.sin(t*5)*.16;
+   // The photographic run cycle is planted on the arrow and wordmark edge.
+   let x,y,angle=.22,air=0,pose=Math.floor(t*14)%8;
+   if(t<2.15){const u=clamp((t-.15)/2,0,1);x=mix(-1.55,1.65,u);y=mix(.35,1.7,u)}
+   else if(t<3.05){const u=clamp((t-2.15)/.9,0,1);x=mix(1.65,2.28,u);y=mix(1.7,-.62,u);air=Math.sin(u*Math.PI)*.85;y+=air;angle=mix(.16,-.18,u);pose=u<.68?3:0}
+   else {const u=clamp((t-3.05)/.8,0,1);x=mix(2.28,3.8,u);y=-.62+Math.sin(u*Math.PI)*1.25;air=Math.sin(u*Math.PI)*1.25;angle=.05;pose=3}
+   jaguar.root.position.set(x,y,.46);jaguar.root.rotation.z=angle;jaguar.root.visible=t>.12&&t<3.85;
+   jaguar.shadow.position.set(x,y-air-.015,.205);jaguar.shadow.material.opacity=.23*(1-clamp(air,0,1)*.85);jaguar.shadow.visible=jaguar.root.visible;
+   jaguar.setFrame(pose);
    intro.classList.toggle('cinema-diving',t>3.7);intro.classList.toggle('cinema-reveal',t>7.05);
    if(t>8){root.classList.add('cinema-arrived');finish();return}
    renderer.render(scene,camera);frame=requestAnimationFrame(tick)
@@ -104,17 +110,10 @@ export async function startIntro(intro) {
  }catch(error){console.warn('Cinema fallback:',error);intro.classList.add('cinema-fallback-only');setTimeout(finish,1800)}
 }
 
-function makeJaguar(){
- const root=new THREE.Group();
- const textureCanvas=document.createElement('canvas');textureCanvas.width=512;textureCanvas.height=256;const c=textureCanvas.getContext('2d');c.fillStyle='#bb872f';c.fillRect(0,0,512,256);
- for(let row=0;row<7;row++)for(let col=0;col<17;col++){let x=col*32+(row%2?15:0),y=row*38;c.strokeStyle='#281a11';c.lineWidth=4;c.beginPath();c.ellipse(x,y,8+(col%3),6+(row%3),col*.73,0,Math.PI*1.8);c.stroke();c.fillStyle='#402613';c.beginPath();c.arc(x+1,y,2,0,7);c.fill()}
- const furTexture=new THREE.CanvasTexture(textureCanvas);furTexture.colorSpace=THREE.SRGBColorSpace;
- const fur=new THREE.MeshStandardMaterial({map:furTexture,color:0xe7bb6c,roughness:.8}),belly=new THREE.MeshStandardMaterial({color:0xe3c78b,roughness:.9}),black=new THREE.MeshStandardMaterial({color:0x17110c,roughness:.6}),eye=new THREE.MeshStandardMaterial({color:0x7ca35a,emissive:0x414c14,emissiveIntensity:.3});
- const ell=(parent,x,y,z,sx,sy,sz,mat=fur)=>{const m=new THREE.Mesh(new THREE.SphereGeometry(1,20,14),mat);m.position.set(x,y,z);m.scale.set(sx,sy,sz);parent.add(m);return m};
- ell(root,0,0,0,.66,.23,.22);ell(root,.36,.06,0,.27,.27,.23);ell(root,-.4,0,0,.28,.25,.22);ell(root,.63,.15,0,.25,.22,.2);ell(root,.81,.06,0,.17,.11,.16,belly);ell(root,.94,.085,0,.055,.045,.07,black);
- for(const z of [-.14,.14]){ell(root,.59,.35,z,.085,.095,.05,black);ell(root,.61,.365,z,.049,.05,.03,belly);ell(root,.78,.19,z*1.2,.035,.026,.018,eye)}
- const legs=[];
- for(const x of [-.43,.38])for(const z of [-.14,.14]){const pivot=new THREE.Group();pivot.position.set(x,-.12,z);root.add(pivot);ell(pivot,0,-.13,0,.095,.2,.085);ell(pivot,.045,-.35,0,.065,.17,.06,belly);ell(pivot,.105,-.49,0,.14,.065,.08,belly);legs.push(pivot)}
- const tail=new THREE.Group();tail.position.set(-.59,.04,0);root.add(tail);const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(),new THREE.Vector3(-.25,.05,0),new THREE.Vector3(-.5,.18,.04),new THREE.Vector3(-.64,.4,.06)]);tail.add(new THREE.Mesh(new THREE.TubeGeometry(curve,20,.043,8,false),fur));ell(tail,-.64,.4,.06,.05,.065,.05,black);
- return {root,legs,tail};
+function makeJaguar(atlas){
+ const root=new THREE.Group();atlas.colorSpace=THREE.SRGBColorSpace;atlas.wrapS=atlas.wrapT=THREE.ClampToEdgeWrapping;atlas.repeat.set(.25,.5);atlas.minFilter=THREE.LinearFilter;atlas.magFilter=THREE.LinearFilter;atlas.generateMipmaps=false;
+ const material=new THREE.MeshBasicMaterial({map:atlas,transparent:true,alphaTest:.025,toneMapped:false,side:THREE.DoubleSide,depthWrite:false,depthTest:false});
+ const cat=new THREE.Mesh(new THREE.PlaneGeometry(2.05,2.05),material);cat.position.y=.55;cat.renderOrder=10;root.add(cat);
+ const shadow=new THREE.Mesh(new THREE.CircleGeometry(1,40),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.23,depthWrite:false}));shadow.scale.set(.68,.055,1);
+ return {root,shadow,setFrame(frame){const col=frame%4,row=Math.floor(frame/4);atlas.offset.set(col/4,(1-row)/2)}};
 }
