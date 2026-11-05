@@ -1,0 +1,12 @@
+export const response=(obj,status=200,extra={})=>new Response(JSON.stringify(obj),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store","x-content-type-options":"nosniff",...extra}});
+const b64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll("+","-").replaceAll("/","_").replaceAll("=","");
+const decode=s=>Uint8Array.from(atob(s.replaceAll("-","+").replaceAll("_","/")),x=>x.charCodeAt(0));
+export const digest=async(s)=>b64(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s))));
+export const safeEqual=(a,b)=>{if(typeof a!=="string"||typeof b!=="string")return false;let n=a.length^b.length;for(let i=0;i<Math.max(a.length,b.length);i++)n|=(a.charCodeAt(i)||0)^(b.charCodeAt(i)||0);return n===0};
+const key=async env=>crypto.subtle.importKey("raw",new TextEncoder().encode(env.ADMIN_SESSION_KEY),"HMAC",false,["sign","verify"]);
+export async function signSession(env,username){const expiry=Math.floor(Date.now()/1000)+43200;const payload=b64(new TextEncoder().encode(JSON.stringify({u:username,e:expiry,v:1})));const sig=b64(new Uint8Array(await crypto.subtle.sign("HMAC",await key(env),new TextEncoder().encode(payload))));return payload+"."+sig}
+export async function admin(request,env){if(!env.ADMIN_SESSION_KEY||!env.ADMIN_USERNAME)return null;const m=(request.headers.get("cookie")||"").match(/(?:^|;\s*)ns_session=([^;]+)/);if(!m)return null;const [p,s]=m[1].split(".");if(!p||!s||p.length>200||s.length>100)return null;try{const ok=await crypto.subtle.verify("HMAC",await key(env),decode(s),new TextEncoder().encode(p));if(!ok)return null;const data=JSON.parse(new TextDecoder().decode(decode(p)));if(data.u!==env.ADMIN_USERNAME||data.e<Math.floor(Date.now()/1000)||data.v!==1)return null;return data.u}catch{return null}}
+export const authorized=async(request,env)=>!!(await admin(request,env));
+export const allowOrigin=request=>{const origin=request.headers.get("origin");return origin===new URL(request.url).origin};
+export const cookie=(value,maxAge=43200)=>"ns_session="+value+"; Path=/api/admin; HttpOnly; Secure; SameSite=Strict; Max-Age="+maxAge;
+export async function hashPassword(password,salt){const raw=await crypto.subtle.importKey("raw",new TextEncoder().encode(password),"PBKDF2",false,["deriveBits"]);const result=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",iterations:210000,salt:new TextEncoder().encode(salt)},raw,256);return b64(new Uint8Array(result))}
